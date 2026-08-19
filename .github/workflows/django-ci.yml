@@ -90,7 +90,7 @@ jobs:
 
 
           # =================================================
-          # SSH CONFIGURATION
+          # SSH SETUP
           # =================================================
 
           mkdir -p ~/.ssh
@@ -123,6 +123,9 @@ jobs:
           echo "Azure Deployment Started"
           echo "========================================"
 
+          echo "Project path : $DEPLOY_PATH"
+          echo "Server       : $AZURE_HOST"
+
 
           # =================================================
           # FIRST-TIME SETUP
@@ -136,9 +139,9 @@ jobs:
               echo "========================================"
 
 
-              # -------------------------------------------------
-              # System packages
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Install system packages
+              # ------------------------------------------------
 
               echo "Installing system packages..."
 
@@ -153,36 +156,43 @@ jobs:
                 curl
 
 
-              # -------------------------------------------------
-              # CLEAN OLD APPLICATION DIRECTORY
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Prepare /var/www
+              # ------------------------------------------------
 
-              echo "Cleaning application directory..."
+              echo "Preparing deployment directory..."
 
               sudo mkdir -p "$(dirname "$DEPLOY_PATH")"
 
               sudo rm -rf "$DEPLOY_PATH"
 
+              sudo mkdir -p "$DEPLOY_PATH"
 
-              # -------------------------------------------------
-              # CLONE REPOSITORY
-              # -------------------------------------------------
+              sudo chown "$USER:$USER" "$DEPLOY_PATH"
 
-              echo "Cloning GitHub repository..."
+              sudo chmod 755 "$DEPLOY_PATH"
+
+
+              # ------------------------------------------------
+              # Fresh GitHub clone
+              # ------------------------------------------------
+
+              echo "Cloning repository..."
 
               git clone \
                 https://github.com/ajayroll1/p1.git \
                 "$DEPLOY_PATH"
 
 
+              # Ensure ownership after clone
               sudo chown -R "$USER:$USER" "$DEPLOY_PATH"
 
               cd "$DEPLOY_PATH"
 
 
-              # -------------------------------------------------
-              # CREATE VIRTUAL ENVIRONMENT
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Python virtual environment
+              # ------------------------------------------------
 
               echo "Creating virtual environment..."
 
@@ -191,11 +201,11 @@ jobs:
               source "$DEPLOY_PATH/.venv/bin/activate"
 
 
-              # -------------------------------------------------
-              # INSTALL PYTHON PACKAGES
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Python dependencies
+              # ------------------------------------------------
 
-              echo "Installing Python packages..."
+              echo "Installing Python dependencies..."
 
               python -m pip install --upgrade pip
 
@@ -204,9 +214,9 @@ jobs:
               pip install gunicorn
 
 
-              # -------------------------------------------------
-              # CONFIGURE DJANGO SETTINGS
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Configure Django production settings
+              # ------------------------------------------------
 
               echo "Configuring Django settings..."
 
@@ -290,32 +300,32 @@ jobs:
 
           settings_file.write_text(text, encoding="utf-8")
 
-          print("Django production settings configured.")
+          print("Production settings configured successfully.")
 
           PY
 
 
-              # -------------------------------------------------
-              # DJANGO CHECK
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Django validation
+              # ------------------------------------------------
 
               echo "Running Django check..."
 
               python manage.py check
 
 
-              # -------------------------------------------------
-              # DATABASE MIGRATIONS
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Database
+              # ------------------------------------------------
 
               echo "Running migrations..."
 
               python manage.py migrate
 
 
-              # -------------------------------------------------
-              # STATIC FILES
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Static files
+              # ------------------------------------------------
 
               echo "Collecting static files..."
 
@@ -377,9 +387,9 @@ jobs:
           NGINX
 
 
-              # -------------------------------------------------
-              # ENABLE NGINX SITE
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Enable Nginx site
+              # ------------------------------------------------
 
               sudo ln -sf \
                 /etc/nginx/sites-available/p1 \
@@ -388,18 +398,18 @@ jobs:
               sudo rm -f /etc/nginx/sites-enabled/default
 
 
-              # -------------------------------------------------
-              # NGINX TEST
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Test Nginx
+              # ------------------------------------------------
 
               echo "Testing Nginx..."
 
               sudo nginx -t
 
 
-              # -------------------------------------------------
-              # ENABLE SERVICES
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Enable services
+              # ------------------------------------------------
 
               sudo systemctl daemon-reload
 
@@ -408,11 +418,11 @@ jobs:
               sudo systemctl enable nginx
 
 
-              # -------------------------------------------------
-              # START SERVICES
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Start services
+              # ------------------------------------------------
 
-              echo "Starting Django service..."
+              echo "Starting Gunicorn..."
 
               sudo systemctl restart p1
 
@@ -421,9 +431,9 @@ jobs:
               sudo systemctl restart nginx
 
 
-              # -------------------------------------------------
-              # HEALTH CHECK
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Health check
+              # ------------------------------------------------
 
               echo "Running health check..."
 
@@ -436,9 +446,9 @@ jobs:
                 > /dev/null
 
 
-              # -------------------------------------------------
-              # BOOTSTRAP MARKER
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Bootstrap marker
+              # ------------------------------------------------
 
               sudo mkdir -p /etc/p1
 
@@ -453,7 +463,7 @@ jobs:
 
 
           # =================================================
-          # FUTURE DEPLOYMENT
+          # FUTURE DEPLOYMENTS
           # =================================================
 
           else
@@ -467,9 +477,9 @@ jobs:
               cd "$DEPLOY_PATH"
 
 
-              # -------------------------------------------------
-              # UPDATE SOURCE CODE
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Get latest code
+              # ------------------------------------------------
 
               echo "Updating source code..."
 
@@ -478,9 +488,9 @@ jobs:
               git reset --hard origin/main
 
 
-              # -------------------------------------------------
-              # VIRTUAL ENVIRONMENT
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Ensure virtual environment exists
+              # ------------------------------------------------
 
               if [ ! -x "$DEPLOY_PATH/.venv/bin/python" ]; then
 
@@ -493,9 +503,9 @@ jobs:
               source "$DEPLOY_PATH/.venv/bin/activate"
 
 
-              # -------------------------------------------------
-              # DEPENDENCIES
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Install dependencies
+              # ------------------------------------------------
 
               echo "Updating Python dependencies..."
 
@@ -506,9 +516,9 @@ jobs:
               pip install gunicorn
 
 
-              # -------------------------------------------------
-              # DJANGO SETTINGS
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Re-apply production settings
+              # ------------------------------------------------
 
               echo "Updating Django production settings..."
 
@@ -522,10 +532,7 @@ jobs:
           text = settings_file.read_text(encoding="utf-8")
 
 
-          # ================================================
           # ALLOWED HOSTS
-          # ================================================
-
           allowed_hosts = (
               'ALLOWED_HOSTS = ["$AZURE_HOST", "127.0.0.1", "localhost"]'
           )
@@ -546,10 +553,7 @@ jobs:
               text += "\n" + allowed_hosts + "\n"
 
 
-          # ================================================
           # STATIC URL
-          # ================================================
-
           static_url = 'STATIC_URL = "/static/"'
 
           if re.search(
@@ -568,10 +572,7 @@ jobs:
               text += "\n" + static_url + "\n"
 
 
-          # ================================================
           # STATIC ROOT
-          # ================================================
-
           static_root = 'STATIC_ROOT = BASE_DIR / "staticfiles"'
 
           if re.search(
@@ -592,61 +593,68 @@ jobs:
 
           settings_file.write_text(text, encoding="utf-8")
 
-          print("Django production settings updated.")
+          print("Production settings updated.")
 
           PY
 
 
-              # -------------------------------------------------
-              # DJANGO CHECK
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Django check
+              # ------------------------------------------------
 
               echo "Running Django check..."
 
               python manage.py check
 
 
-              # -------------------------------------------------
-              # DATABASE
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Migrations
+              # ------------------------------------------------
 
               echo "Running migrations..."
 
               python manage.py migrate
 
 
-              # -------------------------------------------------
-              # STATIC FILES
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Static files
+              # ------------------------------------------------
 
               echo "Collecting static files..."
 
               python manage.py collectstatic --noinput
 
 
-              # -------------------------------------------------
-              # RESTART GUNICORN
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Restart Gunicorn
+              # ------------------------------------------------
 
               echo "Restarting Django..."
 
               sudo systemctl restart p1
 
 
-              # -------------------------------------------------
-              # RELOAD NGINX
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Test Nginx
+              # ------------------------------------------------
 
-              echo "Reloading Nginx..."
+              echo "Testing Nginx..."
 
               sudo nginx -t
+
+
+              # ------------------------------------------------
+              # Reload Nginx
+              # ------------------------------------------------
+
+              echo "Reloading Nginx..."
 
               sudo systemctl reload nginx
 
 
-              # -------------------------------------------------
-              # HEALTH CHECK
-              # -------------------------------------------------
+              # ------------------------------------------------
+              # Health check
+              # ------------------------------------------------
 
               echo "Running health check..."
 
