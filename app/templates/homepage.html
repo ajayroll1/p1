@@ -1,0 +1,140 @@
+from pathlib import Path
+import zipfile
+
+src = Path("/mnt/data/p1_template_only/homepage.html")
+html = src.read_text(encoding="utf-8")
+
+# Add Lucide Icons CDN + initialization before </head>
+icon_head = """
+    <script src="https://unpkg.com/lucide@latest"></script>
+"""
+html = html.replace("</head>", icon_head + "</head>")
+
+# Replace emoji-heavy UI icons with Lucide icon placeholders.
+replacements = {
+    '<span class="brand-badge">🐔</span>': '<span class="brand-badge"><i data-lucide="bird"></i></span>',
+    '<span class="eyebrow">🐔 Premium Django DevOps Showcase</span>':
+        '<span class="eyebrow"><i data-lucide="sparkles"></i> Premium Django DevOps Showcase</span>',
+    '<a class="btn primary" href="#setup">🚀 Explore Setup</a>':
+        '<a class="btn primary" href="#setup"><i data-lucide="rocket"></i> Explore Setup</a>',
+    '<a class="btn" href="#architecture">⚡ View Architecture</a>':
+        '<a class="btn" href="#architecture"><i data-lucide="workflow"></i> View Architecture</a>',
+    '<a class="btn" href="#commands">⌘ Commands</a>':
+        '<a class="btn" href="#commands"><i data-lucide="terminal"></i> Commands</a>',
+    '<div class="bubble">CI passed. Ship it! 🚀</div>':
+        '<div class="bubble">CI passed. Ship it! <i data-lucide="rocket"></i></div>',
+    '<div class="card"><div class="icon">🐍</div><h3>Python Environment</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="code-2"></i></div><h3>Python Environment</h3>',
+    '<div class="card"><div class="icon">⚡</div><h3>Django Project</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="layers-3"></i></div><h3>Django Project</h3>',
+    '<div class="card"><div class="icon">🐙</div><h3>GitHub CI</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="git-branch"></i></div><h3>GitHub CI</h3>',
+    '<div class="card"><div class="icon">☁️</div><h3>Azure VM</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="cloud"></i></div><h3>Azure VM</h3>',
+    '<div class="card"><div class="icon">🚀</div><h3>Gunicorn + systemd</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="server-cog"></i></div><h3>Gunicorn + systemd</h3>',
+    '<div class="card"><div class="icon">🌐</div><h3>Nginx</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="globe-2"></i></div><h3>Nginx</h3>',
+    '<div class="icon">🧪</div><h3>Local environment</h3>':
+        '<div class="icon"><i data-lucide="flask-conical"></i></div><h3>Local environment</h3>',
+    '<div class="icon">🧩</div><h3>Django structure</h3>':
+        '<div class="icon"><i data-lucide="blocks"></i></div><h3>Django structure</h3>',
+    '<div class="step">📥<b>Checkout</b><small>Get repository</small></div>':
+        '<div class="step"><i data-lucide="download"></i><b>Checkout</b><small>Get repository</small></div>',
+    '<div class="step">🐍<b>Python 3.11</b><small>Runner setup</small></div>':
+        '<div class="step"><i data-lucide="code-2"></i><b>Python 3.11</b><small>Runner setup</small></div>',
+    '<div class="step">📦<b>Install</b><small>requirements.txt</small></div>':
+        '<div class="step"><i data-lucide="package"></i><b>Install</b><small>requirements.txt</small></div>',
+    '<div class="step">🔎<b>Django Check</b><small>Config validation</small></div>':
+        '<div class="step"><i data-lucide="search-check"></i><b>Django Check</b><small>Config validation</small></div>',
+    '<div class="step">🧬<b>Migrations</b><small>Consistency check</small></div>':
+        '<div class="step"><i data-lucide="git-merge"></i><b>Migrations</b><small>Consistency check</small></div>',
+    '<div class="step">🗃️<b>Migrate</b><small>SQLite migration</small></div>':
+        '<div class="step"><i data-lucide="database"></i><b>Migrate</b><small>SQLite migration</small></div>',
+    '<div class="step">✅<b>Tests</b><small>python manage.py test</small></div>':
+        '<div class="step"><i data-lucide="circle-check"></i><b>Tests</b><small>python manage.py test</small></div>',
+    '<div><span>🔐</span> <code>AZURE_HOST</code></div>':
+        '<div><span><i data-lucide="lock-keyhole"></i></span> <code>AZURE_HOST</code></div>',
+    '<div><span>🔐</span> <code>AZURE_USERNAME</code></div>':
+        '<div><span><i data-lucide="user-round-key"></i></span> <code>AZURE_USERNAME</code></div>',
+    '<div><span>🔐</span> <code>AZURE_SSH_KEY</code></div>':
+        '<div><span><i data-lucide="key-round"></i></span> <code>AZURE_SSH_KEY</code></div>',
+    '<div><span>⚙️</span> <code>DEPLOY_PATH=/var/www/p1</code></div>':
+        '<div><span><i data-lucide="settings-2"></i></span> <code>DEPLOY_PATH=/var/www/p1</code></div>',
+    '<div><span>☁️</span> Azure VM</div>':
+        '<div><span><i data-lucide="cloud"></i></span> Azure VM</div>',
+    '<div><span>🌐</span> Public IP: <code>102.37.17.210</code></div>':
+        '<div><span><i data-lucide="network"></i></span> Public IP: <code>102.37.17.210</code></div>',
+    '<div><span>👤</span> SSH user: <code>azureuser</code></div>':
+        '<div><span><i data-lucide="user"></i></span> SSH user: <code>azureuser</code></div>',
+    '<div><span>📁</span> App path: <code>/var/www/p1</code></div>':
+        '<div><span><i data-lucide="folder-open"></i></span> App path: <code>/var/www/p1</code></div>',
+    '<div class="card"><div class="icon">🚀</div><h3>Gunicorn</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="rocket"></i></div><h3>Gunicorn</h3>',
+    '<div class="card"><div class="icon">⚙️</div><h3>systemd</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="settings"></i></div><h3>systemd</h3>',
+    '<div class="card"><div class="icon">🌍</div><h3>Nginx</h3>':
+        '<div class="card"><div class="icon"><i data-lucide="globe"></i></div><h3>Nginx</h3>',
+    '<div class="node">👨‍💻 Developer → <strong>git push main</strong></div>':
+        '<div class="node"><i data-lucide="user-round-code"></i> Developer → <strong>git push main</strong></div>',
+    '<div class="node">🐙 GitHub → <strong>GitHub Actions CI</strong></div>':
+        '<div class="node"><i data-lucide="github"></i> GitHub → <strong>GitHub Actions CI</strong></div>',
+    '<div class="node">☁️ Azure VM → <strong>/var/www/p1</strong></div>':
+        '<div class="node"><i data-lucide="cloud"></i> Azure VM → <strong>/var/www/p1</strong></div>',
+    '<div class="node">🌐 Nginx :80</div>':
+        '<div class="node"><i data-lucide="globe-2"></i> Nginx :80</div>',
+    '<div class="node">🚀 Gunicorn :8000</div>':
+        '<div class="node"><i data-lucide="server"></i> Gunicorn :8000</div>',
+    '<div class="node">⚡ Django → 🗄️ SQLite</div>':
+        '<div class="node"><i data-lucide="zap"></i> Django → <i data-lucide="database"></i> SQLite</div>',
+    '<strong>🐔 CluckDeploy</strong>':
+        '<strong><i data-lucide="bird"></i> CluckDeploy</strong>',
+}
+for old, new in replacements.items():
+    html = html.replace(old, new)
+
+# Replace the hard-coded status and list emojis/checkmarks in mini-list items.
+html = html.replace('<div><span>✓</span>', '<div><span><i data-lucide="check"></i></span>')
+html = html.replace('<div class="status"><div class="ok">✓ ', '<div class="status"><div class="ok"><i data-lucide="circle-check"></i> ')
+html = html.replace('<div class="status"><div class="ok">→ CD next</div>', '<div class="status"><div class="ok"><i data-lucide="arrow-right"></i> CD next</div>')
+
+# Add Lucide styling and initialization before closing body.
+lucide_script = """
+<script>
+    lucide.createIcons({
+        attrs: {
+            'stroke-width': 1.8
+        }
+    });
+</script>
+"""
+html = html.replace("</body>", lucide_script + "</body>")
+
+# Make icon sizing consistent.
+icon_css = """
+        [data-lucide]{width:1em;height:1em;vertical-align:-0.15em;stroke:currentColor}
+        .icon [data-lucide]{width:32px;height:32px;stroke-width:1.7}
+        .brand-badge [data-lucide]{width:22px;height:22px}
+        .eyebrow [data-lucide]{width:15px;height:15px}
+        .btn [data-lucide]{width:17px;height:17px}
+        .bubble [data-lucide]{width:16px;height:16px;display:inline-block;vertical-align:-.22em}
+        .step [data-lucide]{width:24px;height:24px;color:var(--green);stroke-width:1.8}
+        .mini-list [data-lucide]{width:15px;height:15px}
+        .node [data-lucide]{width:20px;height:20px;vertical-align:-.2em;margin-right:6px}
+        .status [data-lucide]{width:16px;height:16px;vertical-align:-.2em}
+        .nav-links [data-lucide]{width:14px;height:14px}
+        footer [data-lucide]{width:18px;height:18px;vertical-align:-.25em}
+"""
+html = html.replace("</style>", icon_css + "</style>", 1)
+
+out = Path("/mnt/data/p1_template_premium_icons")
+out.mkdir(exist_ok=True)
+html_path = out / "homepage.html"
+html_path.write_text(html, encoding="utf-8")
+
+zip_path = Path("/mnt/data/p1_template_premium_icons.zip")
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+    z.write(html_path, "homepage.html")
+
+print(f"Created: {html_path}")
+print(f"Created: {zip_path}")
