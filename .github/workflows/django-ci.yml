@@ -1,19 +1,19 @@
-name: Django CI
+name: Django CI/CD
 
 on:
   push:
-    branches: [main]       # Run on main push
+    branches: [main]
   pull_request:
-    branches: [main]       # Run on PR to main
+    branches: [main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4          # Checkout code
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5      # Setup Python
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Django checks
+      - name: Django check
         run: python manage.py check
 
       - name: Check migrations
@@ -32,3 +32,31 @@ jobs:
 
       - name: Run tests
         run: python manage.py test
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Azure
+        env:
+          HOST: ${{ secrets.AZURE_HOST }}
+          USER: ${{ secrets.AZURE_USERNAME }}
+          KEY: ${{ secrets.AZURE_SSH_KEY }}
+          PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$KEY" > ~/.ssh/azure_key
+          chmod 600 ~/.ssh/azure_key
+
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/azure_key "$USER@$HOST" << EOF
+          cd "$PATH"
+          git pull origin main
+          source .venv/bin/activate
+          pip install -r requirements.txt
+          python manage.py migrate
+          python manage.py collectstatic --noinput
+          sudo systemctl restart p1
+          sudo systemctl restart nginx
+          EOF
