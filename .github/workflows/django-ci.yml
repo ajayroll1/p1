@@ -2,21 +2,27 @@ name: Django CI/CD
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+
   pull_request:
-    branches: [main]
+    branches:
+      - main
+
+  workflow_dispatch:
 
 jobs:
 
-  # =========================
-  # CI
-  # =========================
+  # =========================================================
+  # CI - TEST
+  # =========================================================
   test:
     name: Test Django
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -26,26 +32,34 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install gunicorn
 
       - name: Django check
-        run: python manage.py check
+        run: |
+          python manage.py check
 
       - name: Check migrations
-        run: python manage.py makemigrations --check --dry-run
+        run: |
+          python manage.py makemigrations --check --dry-run
 
       - name: Run migrations
-        run: python manage.py migrate
+        run: |
+          python manage.py migrate
 
       - name: Run tests
-        run: python manage.py test
+        run: |
+          python manage.py test
 
 
-  # =========================
-  # CD
-  # =========================
+  # =========================================================
+  # CD - AZURE DEPLOYMENT
+  # =========================================================
   deploy:
     name: Deploy to Azure
+
     needs: test
 
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -54,7 +68,7 @@ jobs:
 
     steps:
 
-      - name: Deploy
+      - name: Deploy to Azure
         env:
           AZURE_HOST: ${{ secrets.AZURE_HOST }}
           AZURE_USERNAME: ${{ secrets.AZURE_USERNAME }}
@@ -63,47 +77,63 @@ jobs:
 
         run: |
 
-          # =========================
-          # GitHub runner SSH setup
-          # =========================
+          set -e
+
+          echo "========================================"
+          echo "       DJANGO AZURE DEPLOYMENT"
+          echo "========================================"
+
+          # -------------------------------------------------
+          # GitHub Runner SSH setup
+          # -------------------------------------------------
 
           mkdir -p ~/.ssh
 
           echo "$AZURE_SSH_KEY" > ~/.ssh/azure_key
+
           chmod 600 ~/.ssh/azure_key
 
-          # =========================
-          # Connect to Azure
-          # =========================
+
+          # -------------------------------------------------
+          # Connect to Azure VM
+          # -------------------------------------------------
 
           ssh \
             -o StrictHostKeyChecking=no \
             -i ~/.ssh/azure_key \
             "$AZURE_USERNAME@$AZURE_HOST" \
-            "DEPLOY_PATH='$DEPLOY_PATH' bash -s" << 'EOF'
+            "DEPLOY_PATH='$DEPLOY_PATH' AZURE_HOST='$AZURE_HOST' bash -s" << 'EOF'
 
           set -e
 
-          echo "======================================"
-          echo "       P1 Django Deployment"
-          echo "======================================"
-
           DEPLOY_PATH="${DEPLOY_PATH:-/var/www/p1}"
+          AZURE_HOST="${AZURE_HOST}"
           MARKER="/etc/p1/bootstrap.done"
 
-          echo "Application path: $DEPLOY_PATH"
 
-          # ==================================================
-          # FIRST TIME SERVER SETUP
-          # ==================================================
+          echo "========================================"
+          echo "Application Path: $DEPLOY_PATH"
+          echo "Azure Host:       $AZURE_HOST"
+          echo "========================================"
+
+
+          # =================================================
+          # FIRST TIME SETUP
+          # =================================================
 
           if [ ! -f "$MARKER" ]; then
 
-              echo "First-time setup detected"
+              echo ""
+              echo "========================================"
+              echo " FIRST TIME SERVER SETUP"
+              echo "========================================"
 
-              # -------------------------
+
+              # ----------------------------------------------
               # System packages
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Installing system packages..."
 
               sudo apt update
 
@@ -115,75 +145,181 @@ jobs:
                 nginx \
                 curl
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Application directory
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Creating application directory..."
 
               sudo mkdir -p "$DEPLOY_PATH"
+
               sudo chown -R "$USER:$USER" "$DEPLOY_PATH"
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Clone repository
-              # -------------------------
+              # ----------------------------------------------
 
-              if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              echo "Cloning repository..."
 
-                  git clone \
-                    https://github.com/ajayroll1/p1.git \
-                    "$DEPLOY_PATH"
-
-              else
-
-                  cd "$DEPLOY_PATH"
-
-                  git fetch origin
-                  git reset --hard origin/main
-
-              fi
+              git clone \
+                https://github.com/ajayroll1/p1.git \
+                "$DEPLOY_PATH"
 
               cd "$DEPLOY_PATH"
 
-              # -------------------------
-              # Virtual environment
-              # -------------------------
 
-              if [ ! -x "$DEPLOY_PATH/.venv/bin/python" ]; then
+              # ----------------------------------------------
+              # Python virtual environment
+              # ----------------------------------------------
 
-                  python3 -m venv "$DEPLOY_PATH/.venv"
+              echo "Creating virtual environment..."
 
-              fi
+              python3 -m venv "$DEPLOY_PATH/.venv"
 
               source "$DEPLOY_PATH/.venv/bin/activate"
 
+
+              # ----------------------------------------------
+              # Python dependencies
+              # ----------------------------------------------
+
+              echo "Installing Python dependencies..."
+
               python -m pip install --upgrade pip
+
               pip install -r requirements.txt
 
-              # Gunicorn
               pip install gunicorn
 
-              # -------------------------
-              # Django validation
-              # -------------------------
+
+              # ----------------------------------------------
+              # Production Django settings
+              # ----------------------------------------------
+
+              echo "Configuring production Django settings..."
+
+              python - <<PY
+
+          from pathlib import Path
+          import re
+
+          settings_file = Path("$DEPLOY_PATH/project/settings.py")
+
+          text = settings_file.read_text(encoding="utf-8")
+
+
+          # =================================================
+          # ALLOWED_HOSTS
+          # =================================================
+
+          allowed_hosts_line = (
+              'ALLOWED_HOSTS = ["$AZURE_HOST", "127.0.0.1", "localhost"]'
+          )
+
+          if re.search(
+              r"^\s*ALLOWED_HOSTS\s*=.*$",
+              text,
+              flags=re.MULTILINE
+          ):
+              text = re.sub(
+                  r"^\s*ALLOWED_HOSTS\s*=.*$",
+                  allowed_hosts_line,
+                  text,
+                  count=1,
+                  flags=re.MULTILINE
+              )
+          else:
+              text += "\n" + allowed_hosts_line + "\n"
+
+
+          # =================================================
+          # STATIC_URL
+          # =================================================
+
+          static_url_line = 'STATIC_URL = "/static/"'
+
+          if re.search(
+              r"^\s*STATIC_URL\s*=.*$",
+              text,
+              flags=re.MULTILINE
+          ):
+              text = re.sub(
+                  r"^\s*STATIC_URL\s*=.*$",
+                  static_url_line,
+                  text,
+                  count=1,
+                  flags=re.MULTILINE
+              )
+          else:
+              text += "\n" + static_url_line + "\n"
+
+
+          # =================================================
+          # STATIC_ROOT
+          # =================================================
+
+          static_root_line = 'STATIC_ROOT = BASE_DIR / "staticfiles"'
+
+          if re.search(
+              r"^\s*STATIC_ROOT\s*=.*$",
+              text,
+              flags=re.MULTILINE
+          ):
+              text = re.sub(
+                  r"^\s*STATIC_ROOT\s*=.*$",
+                  static_root_line,
+                  text,
+                  count=1,
+                  flags=re.MULTILINE
+              )
+          else:
+              text += "\n" + static_root_line + "\n"
+
+
+          settings_file.write_text(text, encoding="utf-8")
+
+          print("Production settings configured successfully")
+
+          PY
+
+
+              # ----------------------------------------------
+              # Verify Django configuration
+              # ----------------------------------------------
+
+              echo "Running Django check..."
 
               python manage.py check
 
-              # -------------------------
-              # Database
-              # -------------------------
+
+              # ----------------------------------------------
+              # Database migrations
+              # ----------------------------------------------
+
+              echo "Running migrations..."
 
               python manage.py migrate
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Static files
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Collecting static files..."
 
               python manage.py collectstatic --noinput
 
-              # ==================================================
-              # SYSTEMD
-              # ==================================================
+
+              # ----------------------------------------------
+              # systemd Gunicorn service
+              # ----------------------------------------------
+
+              echo "Configuring Gunicorn systemd service..."
 
               sudo tee /etc/systemd/system/p1.service > /dev/null << SERVICE
+
           [Unit]
           Description=P1 Django App
           After=network.target
@@ -198,13 +334,18 @@ jobs:
 
           [Install]
           WantedBy=multi-user.target
+
           SERVICE
 
-              # ==================================================
-              # NGINX
-              # ==================================================
+
+              # ----------------------------------------------
+              # Nginx configuration
+              # ----------------------------------------------
+
+              echo "Configuring Nginx..."
 
               sudo tee /etc/nginx/sites-available/p1 > /dev/null << NGINX
+
           server {
               listen 80;
               server_name _;
@@ -222,117 +363,275 @@ jobs:
                   proxy_set_header X-Forwarded-Proto \$scheme;
               }
           }
+
           NGINX
+
+
+              # ----------------------------------------------
+              # Enable Nginx site
+              # ----------------------------------------------
 
               sudo ln -sf \
                 /etc/nginx/sites-available/p1 \
                 /etc/nginx/sites-enabled/p1
 
+
               sudo rm -f /etc/nginx/sites-enabled/default
 
+
+              # ----------------------------------------------
               # Validate Nginx
+              # ----------------------------------------------
+
+              echo "Testing Nginx configuration..."
+
               sudo nginx -t
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Enable services
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Starting services..."
 
               sudo systemctl daemon-reload
 
               sudo systemctl enable p1
+
               sudo systemctl enable nginx
 
               sudo systemctl restart p1
+
               sudo systemctl restart nginx
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Health check
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Running health check..."
 
               sleep 3
 
-              curl -f http://127.0.0.1/ > /dev/null
+              curl \
+                --fail \
+                -H "Host: $AZURE_HOST" \
+                http://127.0.0.1/ \
+                > /dev/null
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Bootstrap marker
-              # -------------------------
+              # ----------------------------------------------
 
               sudo mkdir -p /etc/p1
 
               echo "bootstrap-complete" | \
                 sudo tee "$MARKER" > /dev/null
 
-              echo "======================================"
-              echo " First-time setup completed"
-              echo "======================================"
+
+              echo ""
+              echo "========================================"
+              echo " FIRST DEPLOYMENT SUCCESSFUL"
+              echo "========================================"
 
 
-          # ==================================================
-          # NORMAL DEPLOYMENT
-          # ==================================================
+          # =================================================
+          # FUTURE DEPLOYMENTS
+          # =================================================
 
           else
 
-              echo "Existing server detected"
-              echo "Running update deployment"
+              echo ""
+              echo "========================================"
+              echo " NORMAL UPDATE DEPLOYMENT"
+              echo "========================================"
+
 
               cd "$DEPLOY_PATH"
 
-              # -------------------------
-              # Pull latest code
-              # -------------------------
+
+              # ----------------------------------------------
+              # Latest GitHub code
+              # ----------------------------------------------
+
+              echo "Updating source code..."
 
               git fetch origin
+
               git reset --hard origin/main
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Python environment
-              # -------------------------
+              # ----------------------------------------------
+
+              if [ ! -x "$DEPLOY_PATH/.venv/bin/python" ]; then
+
+                  echo "Creating missing virtual environment..."
+
+                  python3 -m venv "$DEPLOY_PATH/.venv"
+
+              fi
 
               source "$DEPLOY_PATH/.venv/bin/activate"
 
+
+              # ----------------------------------------------
+              # Dependencies
+              # ----------------------------------------------
+
+              echo "Installing dependencies..."
+
+              python -m pip install --upgrade pip
+
               pip install -r requirements.txt
 
-              # Ensure Gunicorn exists
               pip install gunicorn
 
-              # -------------------------
+
+              # ----------------------------------------------
+              # Production settings
+              # ----------------------------------------------
+
+              echo "Updating production settings..."
+
+              python - <<PY
+
+          from pathlib import Path
+          import re
+
+          settings_file = Path("$DEPLOY_PATH/project/settings.py")
+
+          text = settings_file.read_text(encoding="utf-8")
+
+
+          # ALLOWED_HOSTS
+          allowed_hosts_line = (
+              'ALLOWED_HOSTS = ["$AZURE_HOST", "127.0.0.1", "localhost"]'
+          )
+
+          if re.search(
+              r"^\s*ALLOWED_HOSTS\s*=.*$",
+              text,
+              flags=re.MULTILINE
+          ):
+              text = re.sub(
+                  r"^\s*ALLOWED_HOSTS\s*=.*$",
+                  allowed_hosts_line,
+                  text,
+                  count=1,
+                  flags=re.MULTILINE
+              )
+          else:
+              text += "\n" + allowed_hosts_line + "\n"
+
+
+          # STATIC_URL
+          static_url_line = 'STATIC_URL = "/static/"'
+
+          if re.search(
+              r"^\s*STATIC_URL\s*=.*$",
+              text,
+              flags=re.MULTILINE
+          ):
+              text = re.sub(
+                  r"^\s*STATIC_URL\s*=.*$",
+                  static_url_line,
+                  text,
+                  count=1,
+                  flags=re.MULTILINE
+              )
+          else:
+              text += "\n" + static_url_line + "\n"
+
+
+          # STATIC_ROOT
+          static_root_line = 'STATIC_ROOT = BASE_DIR / "staticfiles"'
+
+          if re.search(
+              r"^\s*STATIC_ROOT\s*=.*$",
+              text,
+              flags=re.MULTILINE
+          ):
+              text = re.sub(
+                  r"^\s*STATIC_ROOT\s*=.*$",
+                  static_root_line,
+                  text,
+                  count=1,
+                  flags=re.MULTILINE
+              )
+          else:
+              text += "\n" + static_root_line + "\n"
+
+
+          settings_file.write_text(text, encoding="utf-8")
+
+          print("Production settings updated")
+
+          PY
+
+
+              # ----------------------------------------------
               # Django validation
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Running Django check..."
 
               python manage.py check
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Database
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Running migrations..."
 
               python manage.py migrate
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Static files
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Collecting static files..."
 
               python manage.py collectstatic --noinput
 
-              # -------------------------
-              # Restart application
-              # -------------------------
+
+              # ----------------------------------------------
+              # Restart services
+              # ----------------------------------------------
+
+              echo "Restarting Gunicorn..."
 
               sudo systemctl restart p1
 
+
+              echo "Reloading Nginx..."
+
               sudo systemctl reload nginx
 
-              # -------------------------
+
+              # ----------------------------------------------
               # Health check
-              # -------------------------
+              # ----------------------------------------------
+
+              echo "Running health check..."
 
               sleep 2
 
-              curl -f http://127.0.0.1/ > /dev/null
+              curl \
+                --fail \
+                -H "Host: $AZURE_HOST" \
+                http://127.0.0.1/ \
+                > /dev/null
 
-              echo "======================================"
-              echo " Deployment successful"
-              echo "======================================"
+
+              echo ""
+              echo "========================================"
+              echo " UPDATE DEPLOYMENT SUCCESSFUL"
+              echo "========================================"
 
           fi
 
