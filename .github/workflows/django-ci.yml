@@ -2,9 +2,9 @@ name: Django CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main]       # CI + CD on main push
   pull_request:
-    branches: [main]
+    branches: [main]       # CI on PR to main
 
 jobs:
   test:
@@ -41,17 +41,20 @@ jobs:
     steps:
       - name: Deploy to Azure
         env:
-          HOST: ${{ secrets.AZURE_HOST }}
-          USER: ${{ secrets.AZURE_USERNAME }}
-          KEY: ${{ secrets.AZURE_SSH_KEY }}
-          PATH: ${{ vars.DEPLOY_PATH }}
+          AZURE_HOST: ${{ secrets.AZURE_HOST }}
+          AZURE_USERNAME: ${{ secrets.AZURE_USERNAME }}
+          AZURE_SSH_KEY: ${{ secrets.AZURE_SSH_KEY }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
           mkdir -p ~/.ssh
-          echo "$KEY" > ~/.ssh/azure_key
+          echo "$AZURE_SSH_KEY" > ~/.ssh/azure_key
           chmod 600 ~/.ssh/azure_key
 
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/azure_key "$USER@$HOST" << EOF
-          cd "$PATH"
+          ssh -o StrictHostKeyChecking=no \
+            -i ~/.ssh/azure_key \
+            "$AZURE_USERNAME@$AZURE_HOST" << EOF
+
+          cd "$DEPLOY_PATH"
           git pull origin main
           source .venv/bin/activate
           pip install -r requirements.txt
@@ -59,4 +62,5 @@ jobs:
           python manage.py collectstatic --noinput
           sudo systemctl restart p1
           sudo systemctl restart nginx
+
           EOF
