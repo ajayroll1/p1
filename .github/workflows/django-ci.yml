@@ -14,8 +14,9 @@ on:
 jobs:
 
   # =========================================================
-  # CI - TEST
+  # CI
   # =========================================================
+
   test:
     name: Test Django
     runs-on: ubuntu-latest
@@ -55,8 +56,9 @@ jobs:
 
 
   # =========================================================
-  # CD - AZURE DEPLOYMENT
+  # CD
   # =========================================================
+
   deploy:
     name: Deploy to Azure
 
@@ -80,12 +82,16 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "       DJANGO AZURE DEPLOYMENT"
+          echo "       DJANGO AZURE CI/CD"
           echo "========================================"
 
-          # -------------------------------------------------
-          # GitHub Runner SSH setup
-          # -------------------------------------------------
+          echo "Deploy Path: $DEPLOY_PATH"
+          echo "Azure Host : $AZURE_HOST"
+
+
+          # =================================================
+          # SSH CONFIGURATION
+          # =================================================
 
           mkdir -p ~/.ssh
 
@@ -94,9 +100,9 @@ jobs:
           chmod 600 ~/.ssh/azure_key
 
 
-          # -------------------------------------------------
-          # Connect to Azure VM
-          # -------------------------------------------------
+          # =================================================
+          # CONNECT TO AZURE
+          # =================================================
 
           ssh \
             -o StrictHostKeyChecking=no \
@@ -108,30 +114,31 @@ jobs:
 
           DEPLOY_PATH="${DEPLOY_PATH:-/var/www/p1}"
           AZURE_HOST="${AZURE_HOST}"
+
           MARKER="/etc/p1/bootstrap.done"
 
 
+          echo ""
           echo "========================================"
-          echo "Application Path: $DEPLOY_PATH"
-          echo "Azure Host:       $AZURE_HOST"
+          echo "Azure Deployment Started"
           echo "========================================"
 
 
           # =================================================
-          # FIRST TIME SETUP
+          # FIRST-TIME SETUP
           # =================================================
 
           if [ ! -f "$MARKER" ]; then
 
               echo ""
               echo "========================================"
-              echo " FIRST TIME SERVER SETUP"
+              echo "FIRST-TIME SERVER SETUP"
               echo "========================================"
 
 
-              # ----------------------------------------------
+              # -------------------------------------------------
               # System packages
-              # ----------------------------------------------
+              # -------------------------------------------------
 
               echo "Installing system packages..."
 
@@ -146,33 +153,36 @@ jobs:
                 curl
 
 
-              # ----------------------------------------------
-              # Application directory
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # CLEAN OLD APPLICATION DIRECTORY
+              # -------------------------------------------------
 
-              echo "Creating application directory..."
+              echo "Cleaning application directory..."
 
-              sudo mkdir -p "$DEPLOY_PATH"
+              sudo mkdir -p "$(dirname "$DEPLOY_PATH")"
 
-              sudo chown -R "$USER:$USER" "$DEPLOY_PATH"
+              sudo rm -rf "$DEPLOY_PATH"
 
 
-              # ----------------------------------------------
-              # Clone repository
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # CLONE REPOSITORY
+              # -------------------------------------------------
 
-              echo "Cloning repository..."
+              echo "Cloning GitHub repository..."
 
               git clone \
                 https://github.com/ajayroll1/p1.git \
                 "$DEPLOY_PATH"
 
+
+              sudo chown -R "$USER:$USER" "$DEPLOY_PATH"
+
               cd "$DEPLOY_PATH"
 
 
-              # ----------------------------------------------
-              # Python virtual environment
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # CREATE VIRTUAL ENVIRONMENT
+              # -------------------------------------------------
 
               echo "Creating virtual environment..."
 
@@ -181,11 +191,11 @@ jobs:
               source "$DEPLOY_PATH/.venv/bin/activate"
 
 
-              # ----------------------------------------------
-              # Python dependencies
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # INSTALL PYTHON PACKAGES
+              # -------------------------------------------------
 
-              echo "Installing Python dependencies..."
+              echo "Installing Python packages..."
 
               python -m pip install --upgrade pip
 
@@ -194,11 +204,11 @@ jobs:
               pip install gunicorn
 
 
-              # ----------------------------------------------
-              # Production Django settings
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # CONFIGURE DJANGO SETTINGS
+              # -------------------------------------------------
 
-              echo "Configuring production Django settings..."
+              echo "Configuring Django settings..."
 
               python - <<PY
 
@@ -210,11 +220,11 @@ jobs:
           text = settings_file.read_text(encoding="utf-8")
 
 
-          # =================================================
-          # ALLOWED_HOSTS
-          # =================================================
+          # ================================================
+          # ALLOWED HOSTS
+          # ================================================
 
-          allowed_hosts_line = (
+          allowed_hosts = (
               'ALLOWED_HOSTS = ["$AZURE_HOST", "127.0.0.1", "localhost"]'
           )
 
@@ -225,20 +235,20 @@ jobs:
           ):
               text = re.sub(
                   r"^\s*ALLOWED_HOSTS\s*=.*$",
-                  allowed_hosts_line,
+                  allowed_hosts,
                   text,
                   count=1,
                   flags=re.MULTILINE
               )
           else:
-              text += "\n" + allowed_hosts_line + "\n"
+              text += "\n" + allowed_hosts + "\n"
 
 
-          # =================================================
-          # STATIC_URL
-          # =================================================
+          # ================================================
+          # STATIC URL
+          # ================================================
 
-          static_url_line = 'STATIC_URL = "/static/"'
+          static_url = 'STATIC_URL = "/static/"'
 
           if re.search(
               r"^\s*STATIC_URL\s*=.*$",
@@ -247,20 +257,20 @@ jobs:
           ):
               text = re.sub(
                   r"^\s*STATIC_URL\s*=.*$",
-                  static_url_line,
+                  static_url,
                   text,
                   count=1,
                   flags=re.MULTILINE
               )
           else:
-              text += "\n" + static_url_line + "\n"
+              text += "\n" + static_url + "\n"
 
 
-          # =================================================
-          # STATIC_ROOT
-          # =================================================
+          # ================================================
+          # STATIC ROOT
+          # ================================================
 
-          static_root_line = 'STATIC_ROOT = BASE_DIR / "staticfiles"'
+          static_root = 'STATIC_ROOT = BASE_DIR / "staticfiles"'
 
           if re.search(
               r"^\s*STATIC_ROOT\s*=.*$",
@@ -269,54 +279,54 @@ jobs:
           ):
               text = re.sub(
                   r"^\s*STATIC_ROOT\s*=.*$",
-                  static_root_line,
+                  static_root,
                   text,
                   count=1,
                   flags=re.MULTILINE
               )
           else:
-              text += "\n" + static_root_line + "\n"
+              text += "\n" + static_root + "\n"
 
 
           settings_file.write_text(text, encoding="utf-8")
 
-          print("Production settings configured successfully")
+          print("Django production settings configured.")
 
           PY
 
 
-              # ----------------------------------------------
-              # Verify Django configuration
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # DJANGO CHECK
+              # -------------------------------------------------
 
               echo "Running Django check..."
 
               python manage.py check
 
 
-              # ----------------------------------------------
-              # Database migrations
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # DATABASE MIGRATIONS
+              # -------------------------------------------------
 
               echo "Running migrations..."
 
               python manage.py migrate
 
 
-              # ----------------------------------------------
-              # Static files
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # STATIC FILES
+              # -------------------------------------------------
 
               echo "Collecting static files..."
 
               python manage.py collectstatic --noinput
 
 
-              # ----------------------------------------------
-              # systemd Gunicorn service
-              # ----------------------------------------------
+              # =================================================
+              # SYSTEMD / GUNICORN
+              # =================================================
 
-              echo "Configuring Gunicorn systemd service..."
+              echo "Creating Gunicorn systemd service..."
 
               sudo tee /etc/systemd/system/p1.service > /dev/null << SERVICE
 
@@ -338,11 +348,11 @@ jobs:
           SERVICE
 
 
-              # ----------------------------------------------
-              # Nginx configuration
-              # ----------------------------------------------
+              # =================================================
+              # NGINX
+              # =================================================
 
-              echo "Configuring Nginx..."
+              echo "Creating Nginx configuration..."
 
               sudo tee /etc/nginx/sites-available/p1 > /dev/null << NGINX
 
@@ -367,32 +377,29 @@ jobs:
           NGINX
 
 
-              # ----------------------------------------------
-              # Enable Nginx site
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # ENABLE NGINX SITE
+              # -------------------------------------------------
 
               sudo ln -sf \
                 /etc/nginx/sites-available/p1 \
                 /etc/nginx/sites-enabled/p1
 
-
               sudo rm -f /etc/nginx/sites-enabled/default
 
 
-              # ----------------------------------------------
-              # Validate Nginx
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # NGINX TEST
+              # -------------------------------------------------
 
-              echo "Testing Nginx configuration..."
+              echo "Testing Nginx..."
 
               sudo nginx -t
 
 
-              # ----------------------------------------------
-              # Enable services
-              # ----------------------------------------------
-
-              echo "Starting services..."
+              # -------------------------------------------------
+              # ENABLE SERVICES
+              # -------------------------------------------------
 
               sudo systemctl daemon-reload
 
@@ -400,14 +407,23 @@ jobs:
 
               sudo systemctl enable nginx
 
+
+              # -------------------------------------------------
+              # START SERVICES
+              # -------------------------------------------------
+
+              echo "Starting Django service..."
+
               sudo systemctl restart p1
+
+              echo "Starting Nginx..."
 
               sudo systemctl restart nginx
 
 
-              # ----------------------------------------------
-              # Health check
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # HEALTH CHECK
+              # -------------------------------------------------
 
               echo "Running health check..."
 
@@ -420,9 +436,9 @@ jobs:
                 > /dev/null
 
 
-              # ----------------------------------------------
-              # Bootstrap marker
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # BOOTSTRAP MARKER
+              # -------------------------------------------------
 
               sudo mkdir -p /etc/p1
 
@@ -432,28 +448,28 @@ jobs:
 
               echo ""
               echo "========================================"
-              echo " FIRST DEPLOYMENT SUCCESSFUL"
+              echo "FIRST DEPLOYMENT SUCCESSFUL"
               echo "========================================"
 
 
           # =================================================
-          # FUTURE DEPLOYMENTS
+          # FUTURE DEPLOYMENT
           # =================================================
 
           else
 
               echo ""
               echo "========================================"
-              echo " NORMAL UPDATE DEPLOYMENT"
+              echo "NORMAL UPDATE DEPLOYMENT"
               echo "========================================"
 
 
               cd "$DEPLOY_PATH"
 
 
-              # ----------------------------------------------
-              # Latest GitHub code
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # UPDATE SOURCE CODE
+              # -------------------------------------------------
 
               echo "Updating source code..."
 
@@ -462,13 +478,13 @@ jobs:
               git reset --hard origin/main
 
 
-              # ----------------------------------------------
-              # Python environment
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # VIRTUAL ENVIRONMENT
+              # -------------------------------------------------
 
               if [ ! -x "$DEPLOY_PATH/.venv/bin/python" ]; then
 
-                  echo "Creating missing virtual environment..."
+                  echo "Virtual environment missing."
 
                   python3 -m venv "$DEPLOY_PATH/.venv"
 
@@ -477,11 +493,11 @@ jobs:
               source "$DEPLOY_PATH/.venv/bin/activate"
 
 
-              # ----------------------------------------------
-              # Dependencies
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # DEPENDENCIES
+              # -------------------------------------------------
 
-              echo "Installing dependencies..."
+              echo "Updating Python dependencies..."
 
               python -m pip install --upgrade pip
 
@@ -490,11 +506,11 @@ jobs:
               pip install gunicorn
 
 
-              # ----------------------------------------------
-              # Production settings
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # DJANGO SETTINGS
+              # -------------------------------------------------
 
-              echo "Updating production settings..."
+              echo "Updating Django production settings..."
 
               python - <<PY
 
@@ -506,8 +522,11 @@ jobs:
           text = settings_file.read_text(encoding="utf-8")
 
 
-          # ALLOWED_HOSTS
-          allowed_hosts_line = (
+          # ================================================
+          # ALLOWED HOSTS
+          # ================================================
+
+          allowed_hosts = (
               'ALLOWED_HOSTS = ["$AZURE_HOST", "127.0.0.1", "localhost"]'
           )
 
@@ -518,17 +537,20 @@ jobs:
           ):
               text = re.sub(
                   r"^\s*ALLOWED_HOSTS\s*=.*$",
-                  allowed_hosts_line,
+                  allowed_hosts,
                   text,
                   count=1,
                   flags=re.MULTILINE
               )
           else:
-              text += "\n" + allowed_hosts_line + "\n"
+              text += "\n" + allowed_hosts + "\n"
 
 
-          # STATIC_URL
-          static_url_line = 'STATIC_URL = "/static/"'
+          # ================================================
+          # STATIC URL
+          # ================================================
+
+          static_url = 'STATIC_URL = "/static/"'
 
           if re.search(
               r"^\s*STATIC_URL\s*=.*$",
@@ -537,17 +559,20 @@ jobs:
           ):
               text = re.sub(
                   r"^\s*STATIC_URL\s*=.*$",
-                  static_url_line,
+                  static_url,
                   text,
                   count=1,
                   flags=re.MULTILINE
               )
           else:
-              text += "\n" + static_url_line + "\n"
+              text += "\n" + static_url + "\n"
 
 
-          # STATIC_ROOT
-          static_root_line = 'STATIC_ROOT = BASE_DIR / "staticfiles"'
+          # ================================================
+          # STATIC ROOT
+          # ================================================
+
+          static_root = 'STATIC_ROOT = BASE_DIR / "staticfiles"'
 
           if re.search(
               r"^\s*STATIC_ROOT\s*=.*$",
@@ -556,66 +581,72 @@ jobs:
           ):
               text = re.sub(
                   r"^\s*STATIC_ROOT\s*=.*$",
-                  static_root_line,
+                  static_root,
                   text,
                   count=1,
                   flags=re.MULTILINE
               )
           else:
-              text += "\n" + static_root_line + "\n"
+              text += "\n" + static_root + "\n"
 
 
           settings_file.write_text(text, encoding="utf-8")
 
-          print("Production settings updated")
+          print("Django production settings updated.")
 
           PY
 
 
-              # ----------------------------------------------
-              # Django validation
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # DJANGO CHECK
+              # -------------------------------------------------
 
               echo "Running Django check..."
 
               python manage.py check
 
 
-              # ----------------------------------------------
-              # Database
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # DATABASE
+              # -------------------------------------------------
 
               echo "Running migrations..."
 
               python manage.py migrate
 
 
-              # ----------------------------------------------
-              # Static files
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # STATIC FILES
+              # -------------------------------------------------
 
               echo "Collecting static files..."
 
               python manage.py collectstatic --noinput
 
 
-              # ----------------------------------------------
-              # Restart services
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # RESTART GUNICORN
+              # -------------------------------------------------
 
-              echo "Restarting Gunicorn..."
+              echo "Restarting Django..."
 
               sudo systemctl restart p1
 
 
+              # -------------------------------------------------
+              # RELOAD NGINX
+              # -------------------------------------------------
+
               echo "Reloading Nginx..."
+
+              sudo nginx -t
 
               sudo systemctl reload nginx
 
 
-              # ----------------------------------------------
-              # Health check
-              # ----------------------------------------------
+              # -------------------------------------------------
+              # HEALTH CHECK
+              # -------------------------------------------------
 
               echo "Running health check..."
 
@@ -630,7 +661,7 @@ jobs:
 
               echo ""
               echo "========================================"
-              echo " UPDATE DEPLOYMENT SUCCESSFUL"
+              echo "UPDATE DEPLOYMENT SUCCESSFUL"
               echo "========================================"
 
           fi
